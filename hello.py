@@ -9,6 +9,7 @@ import tables
 
 class TestAlchemyBase(unittest.TestCase):
     def setUp(self):
+        # lazy connect, connecting doesn't occur until a task against database is necessary
         self.engine = sqlalchemy.create_engine('sqlite:///:memory:', echo = True)
 
     def tearDown(self):
@@ -70,18 +71,37 @@ class TestAlchemyConn(TestAlchemyBase):
                                  )
         self.metadata.create_all(self.engine)
 
+    def test_insert(self):
+        ins = self.users.insert().values(name = "foo", password = "bar")
+        with self.engine.connect() as conn:
+            conn.execute(ins)
+
     def test_select(self):
         with self.engine.connect() as conn:
             sel = sqlalchemy.sql.select([tables.User])
+            # Executes a SQL statement construct and returns a :class:`.ResultProxy`.
+            # ResultProxy wraps a DB-API cursor object to provide easier access to row columns
             result = conn.execute(sel)
-            result.close()
+            try:
+                # The 'rowcount' reports the number of rows *matched*, by the WHERE criterion of an UPDATE or DELETE statement.
+                # https://github.com/zzzeek/sqlalchemy/blob/master/lib/sqlalchemy/engine/result.py#L695
+                # rowcount is defined as function, but since util.memoized_property, it's a property now somehow
+                self.assertEquals(result.rowcount, - 1, "Row count should be -1 since it's an select statement")
+                for row in result:
+                    self.assertTrue("foo" == row["name"] and "bar" == row["password"], "There should be only one row...")
+            except Exception as e:
+                # This is not necessary
+                self.assertTrue(False, e.message)
+            finally:
+                result.close()
 
-if __name__ == '__main__':
-    suite1 = unittest.TestLoader().loadTestsFromTestCase(TestAlchemySession)
-    # wasSuccessful returns 1 if success, otherwise 0
-    ret1 = unittest.TextTestRunner(verbosity = 2).run(suite1).wasSuccessful()
+# unittest ignores __main__, therefore in order to retrieve the test result, manual override is necessary
+#if __name__ == '__main__':
+suite1 = unittest.TestLoader().loadTestsFromTestCase(TestAlchemySession)
+# wasSuccessful returns 1 if success, otherwise 0
+ret1 = unittest.TextTestRunner(verbosity = 2).run(suite1).wasSuccessful()
 
-    suite2 = unittest.TestLoader().loadTestsFromTestCase(TestAlchemyConn)
-    ret2 = unittest.TextTestRunner(verbosity = 2).run(suite2).wasSuccessful()
+suite2 = unittest.TestLoader().loadTestsFromTestCase(TestAlchemyConn)
+ret2 = unittest.TextTestRunner(verbosity = 2).run(suite2).wasSuccessful()
 
-    sys.exit(not(ret1 == 1 and ret2 == 1))
+sys.exit(not(ret1 == 1 and ret2 == 1))
